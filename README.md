@@ -1,1 +1,8 @@
 "#Slackbot Test" 
+
+Environment Variables to include in .env file:
+SLACK_API_TOKEN
+SLACK_SIGNING_SECRET
+SLACK_USER_ID
+SLACK_APP_ID
+SLACK_VERIFICATION_TOKEN
