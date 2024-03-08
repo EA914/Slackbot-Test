@@ -6,7 +6,7 @@
 import os
 import requests
 import threading
-from flask import Flask, request, jsonify, Response
+from flask import Flask, request, jsonify
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 from slack_sdk.signature import SignatureVerifier
@@ -146,6 +146,48 @@ def dad_joke():
 		print("Request Error:", e)
 
 	return '', 200
+	
+	
+# Endpoint for the /country command
+@app.route('/country', methods=['POST'])
+def country_command():
+	# Get the command text from the request
+	command_text = request.form['text'].strip()
+
+	# Fetch the JSON data with country names and codes
+	try:
+		response = requests.get('https://flagcdn.com/en/codes.json')
+		response.raise_for_status()
+		countries = response.json()
+	except requests.exceptions.RequestException as e:
+		return jsonify({'response_type': 'ephemeral', 'text': f'Error: {e}'})
+
+	# Check if the command is requesting help
+	if command_text == '--help':
+		# Show a list of allowed country codes
+		allowed_codes = '\n'.join([f'{code}: {name}' for code, name in countries.items()])
+		return jsonify({
+			'response_type': 'ephemeral',
+			'text': f'Allowed country codes:\n{allowed_codes}'
+		})
+
+	# Check if the command includes a valid country code
+	if command_text in countries:
+		country_name = countries[command_text]
+		flag_url = f'https://flagcdn.com/96x72/{command_text.lower()}.png'
+
+		# Respond with the flag image and country name
+		return jsonify({
+			'response_type': 'in_channel',
+			'text': f'Flag of {country_name}:',
+			'attachments': [{'image_url': flag_url}]
+		})
+	else:
+		# If the country code is not valid, show an error message
+		return jsonify({
+			'response_type': 'ephemeral',
+			'text': 'Invalid country code. Type "/country --help" for a list of allowed country codes.'
+		})
 
 if __name__ == '__main__':
 	app.run(port=5000)
