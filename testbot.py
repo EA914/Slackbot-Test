@@ -189,5 +189,48 @@ def country_command():
 			'text': 'Invalid country code. Type "/country --help" for a list of allowed country codes.'
 		})
 
+import requests
+
+# Function to fetch a random word with a specified length
+def get_random_word(length=None):
+	url = 'https://random-word-api.herokuapp.com/word'
+	params = {'length': length} if length else {}
+	response = requests.get(url, params=params)
+	response.raise_for_status()
+	return response.json()[0]
+
+# Endpoint for the /random command
+@app.route('/random', methods=['POST'])
+def random_word_command():
+	# Get the command text from the request
+	command_text = request.form['text'].strip()
+
+	# Extract the length parameter from the command text
+	try:
+		length = int(command_text.split('--')[1])
+	except IndexError:
+		length = None
+	except ValueError:
+		return jsonify({
+			'response_type': 'ephemeral',
+			'text': 'Invalid length parameter. Please use "--<number>" to specify the length.'
+		})
+
+	# Fetch a random word with the specified length
+	try:
+		word = get_random_word(length)
+		# Capitalize the first letter of the word
+		word = word.capitalize()
+		return jsonify({
+			'response_type': 'in_channel',
+			'text': f'{word}'
+		})
+	except requests.exceptions.RequestException as e:
+		return jsonify({
+			'response_type': 'ephemeral',
+			'text': f'Error fetching random word: {e}'
+		})
+
+
 if __name__ == '__main__':
 	app.run(port=5000)
