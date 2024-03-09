@@ -6,6 +6,7 @@
 import os
 import requests
 import threading
+import openai
 from flask import Flask, request, jsonify
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
@@ -32,6 +33,9 @@ client = WebClient(token=os.getenv('SLACK_API_TOKEN'))
 
 # Create a SignatureVerifier instance
 verifier = SignatureVerifier(signing_secret)
+
+#Set OpenAI API key
+openai.api_key = os.getenv('CHATGPT_API_KEY')
 
 # Post the message from message.txt to the #testing channel
 try:
@@ -230,7 +234,52 @@ def random_word_command():
 			'response_type': 'ephemeral',
 			'text': f'Error fetching random word: {e}'
 		})
+# Function to send query to ChatGPT and get response
+def interact_with_chatgpt(message):
+	completion = openai.ChatCompletion.create(
+		model='gpt-3.5-turbo',
+		messages=[
+			{'role': 'user', 'content': message}
+		],
+		max_tokens=50,
+		temperature=0.7
+	)
 
+	return completion.choices[0].message['content']
 
+@app.route('/chatgpt', methods=['POST'])
+def chat_gpt():
+	# Get the text from the request
+	text = request.form.get('text')
+	
+	try:
+		# Use the OpenAI API to generate a completion
+		response = openai.ChatCompletion.create(
+			model='gpt-3.5-turbo',	# Use the correct model name
+			messages=[
+				{'role': 'system', 'content': 'You are a helpful assistant.'},
+				{'role': 'user', 'content': text}
+			],
+			max_tokens=50,
+			temperature=0.7
+		)
+		
+		# Get the completion text from the response
+		completion_text = response.choices[0].message.content
+		
+		# Respond with the completion text
+		return jsonify({
+			'response_type': 'in_channel',
+			'text': completion_text
+		})
+	
+	except openai.error.InvalidRequestError as e:
+		# Handle OpenAI API errors
+		error_message = str(e)
+		print("OpenAI API Error:", error_message)
+		return jsonify({
+			'response_type': 'ephemeral',
+			'text': f"Error processing request: {error_message}"
+		})
 if __name__ == '__main__':
 	app.run(port=5000)
