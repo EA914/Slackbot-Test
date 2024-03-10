@@ -16,13 +16,13 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
-# Get the Slack signing secret from environment variable
+# Get the Slack signing secret from the environment variable
 signing_secret = os.getenv('SLACK_SIGNING_SECRET')
 if not signing_secret:
 	print("Please set the 'SLACK_SIGNING_SECRET' environment variable.")
 	exit(1)
 
-# Get app ID from the environment variable
+# Get the app ID from the environment variable
 app_id = os.getenv('SLACK_APP_ID')
 if not app_id:
 	print("Please set the 'SLACK_APP_ID' environment variable.")
@@ -34,7 +34,7 @@ client = WebClient(token=os.getenv('SLACK_API_TOKEN'))
 # Create a SignatureVerifier instance
 verifier = SignatureVerifier(signing_secret)
 
-#Set OpenAI API key
+# Set OpenAI API key
 openai.api_key = os.getenv('CHATGPT_API_KEY')
 
 # Post the message from message.txt to the #testing channel
@@ -48,14 +48,11 @@ except SlackApiError as e:
 # Create a Flask app
 app = Flask(__name__)
 
-# Variable to keep track of whether the bot should respond to the next message
-should_respond = False
-
-def generate_and_upload_image():
+def generate_and_upload_image(channel_id):
 	try:
 		# Get a random image from Lorem Picsum
 		response = requests.get('https://picsum.photos/200', timeout=5)
-		response.raise_for_status()			  # Raise an exception for 4xx and 5xx status codes
+		response.raise_for_status()
 
 		# Save the image locally
 		with open('image.jpg', 'wb') as out_file:
@@ -64,14 +61,14 @@ def generate_and_upload_image():
 		# Upload the image to Slack using client.files_upload_v2()
 		with open('image.jpg', 'rb') as file:
 			response = client.files_upload_v2(
-				channel='C06N8BVF0LW',	 # Channel ID for #testing
+				channel=channel_id,
 				file=file,
 				initial_comment="Random Image"
 			)
 
 	except requests.exceptions.RequestException as e:
-		# Handle any request exceptions
 		print("Request Error:", e)
+
 
 @app.route('/slack/events', methods=['POST'])
 def slack_events():
@@ -97,14 +94,17 @@ def slack_events():
 				should_respond = True
 
 	return '', 200
-	
+
 @app.route('/image', methods=['POST'])
 def random_image():
+	# Get the channel ID from the request
+	channel_id = request.form['channel_id']
+
 	# Check if the request is coming from the Slack command
 	if request.form['token'] == os.getenv('SLACK_VERIFICATION_TOKEN'):
 		try:
 			# Immediate response to Slack command
-			threading.Thread(target=generate_and_upload_image).start()
+			threading.Thread(target=generate_and_upload_image, args=(channel_id,)).start()
 
 			return jsonify({
 				"response_type": "in_channel",
@@ -116,6 +116,7 @@ def random_image():
 
 	return '', 200
 
+
 @app.route('/awesome', methods=['POST'])
 def awesome_command():
 	try:
@@ -124,35 +125,54 @@ def awesome_command():
 		response = client.users_info(user=user_id)
 		user_name = response.data['user']['profile']['display_name']
 
+		# Get the channel ID from the request
+		channel_id = request.form['channel_id']
+
 		# Respond with the message
-		client.chat_postMessage(channel='#testing', text=f"{user_name} is awesome!")
+		client.chat_postMessage(channel=channel_id, text=f"{user_name} is awesome!")
 
 	except SlackApiError as e:
 		print("Error sending message:", e)
 
 	return '', 200
 
+# Update the dad_joke() function to handle DMs
 @app.route('/joke', methods=['POST'])
 def dad_joke():
 	try:
-		# Get a random dad joke from icanhazdadjoke.com
-		response = requests.get('https://icanhazdadjoke.com/', headers={'Accept': 'application/json'})
-		response.raise_for_status()	 # Raise an exception for 4xx and 5xx status codes
+		# Get the channel ID from the request
+		channel_id = request.form['channel_id']
 
-		# Extract the joke from the response
-		joke = response.json()['joke']
+		# Check if the channel is a DM
+		if channel_id.startswith('D'):
+			# Get a random dad joke from icanhazdadjoke.com
+			response = requests.get('https://icanhazdadjoke.com/', headers={'Accept': 'application/json'})
+			response.raise_for_status()
 
-		# Post the joke as a message in the channel
-		client.chat_postMessage(channel='#testing', text=joke)
+			# Extract the joke from the response
+			joke = response.json()['joke']
+
+			# Get the user ID from the request
+			user_id = request.form['user_id']
+
+			# Send the joke as a direct message to the user
+			client.chat_postMessage(channel=user_id, text=joke)
+		else:
+			# Get a random dad joke from icanhazdadjoke.com
+			response = requests.get('https://icanhazdadjoke.com/', headers={'Accept': 'application/json'})
+			response.raise_for_status()
+
+			# Extract the joke from the response
+			joke = response.json()['joke']
+
+			# Post the joke as a message in the channel
+			client.chat_postMessage(channel=channel_id, text=joke)
 
 	except requests.exceptions.RequestException as e:
-		# Handle any request exceptions
 		print("Request Error:", e)
 
 	return '', 200
-	
-	
-# Endpoint for the /country command
+
 @app.route('/country', methods=['POST'])
 def country_command():
 	# Get the command text from the request
@@ -193,17 +213,6 @@ def country_command():
 			'text': 'Invalid country code. Type "/country --help" for a list of allowed country codes.'
 		})
 
-import requests
-
-# Function to fetch a random word with a specified length
-def get_random_word(length=None):
-	url = 'https://random-word-api.herokuapp.com/word'
-	params = {'length': length} if length else {}
-	response = requests.get(url, params=params)
-	response.raise_for_status()
-	return response.json()[0]
-
-# Endpoint for the /random command
 @app.route('/random', methods=['POST'])
 def random_word_command():
 	# Get the command text from the request
@@ -234,7 +243,14 @@ def random_word_command():
 			'response_type': 'ephemeral',
 			'text': f'Error fetching random word: {e}'
 		})
-# Function to send query to ChatGPT and get response
+
+def get_random_word(length=None):
+	url = 'https://random-word-api.herokuapp.com/word'
+	params = {'length': length} if length else {}
+	response = requests.get(url, params=params)
+	response.raise_for_status()
+	return response.json()[0]
+	
 def interact_with_chatgpt(message):
 	completion = openai.ChatCompletion.create(
 		model='gpt-3.5-turbo',
