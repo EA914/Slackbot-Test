@@ -7,6 +7,9 @@ import os
 import requests
 import threading
 import openai
+import random
+import unicodedata
+import re
 from flask import Flask, request, jsonify
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
@@ -297,5 +300,122 @@ def chat_gpt():
 			'response_type': 'ephemeral',
 			'text': f"Error processing request: {error_message}"
 		})
+
+@app.route('/emoji', methods=['POST'])
+
+def handle_emoji_command():
+	api_key = os.getenv('OPEN_EMOJI_API_KEY')
+
+	text = request.form.get('text', '')
+
+	# Check for the --random flag
+	if '--random' in text:
+		# Fetch a random emoji
+		try:
+			response = requests.get(f'https://emoji-api.com/emojis?access_key={api_key}')
+			response.raise_for_status()
+			emojis = response.json()
+			random_emoji = random.choice(emojis)
+			return jsonify({
+				'response_type': 'in_channel',
+				'text': f'{random_emoji["character"]} - {random_emoji["unicodeName"]}'
+			})
+		except requests.exceptions.RequestException as e:
+			return jsonify({'response_type': 'ephemeral', 'text': f'Error: {e}'})
+
+	# Check if the text is an emoji character
+	if len(text) == 1 and unicodedata.category(text) == 'So':
+		emoji_code = ord(text)
+		# Fetch the emoji description
+		try:
+			response = requests.get(f'https://emoji-api.com/emojis?search={emoji_code}&access_key={api_key}')
+			response.raise_for_status()
+			emoji_data = response.json()
+			if emoji_data:
+				return jsonify({
+					'response_type': 'in_channel',
+					'text': f'{emoji_data[0]["character"]} - {emoji_data[0]["unicodeName"]}: {emoji_data[0]["slug"]}'
+				})
+			else:
+				return jsonify({
+					'response_type': 'ephemeral',
+					'text': 'Emoji not found.'
+				})
+		except requests.exceptions.RequestException as e:
+			return jsonify({'response_type': 'ephemeral', 'text': f'Error: {e}'})
+
+	return jsonify({
+		'response_type': 'ephemeral',
+		'text': 'Please provide a valid flag (--random or --<emoji>)'
+	})
+
+@app.route('/animal', methods=['POST'])
+def animal_command():
+	# Get the command text from the request
+	command_text = request.form.get('text', '')
+
+	# Extract the animal name and flag (if provided)
+	parts = command_text.split()
+	if len(parts) < 1:
+		return jsonify({
+			'response_type': 'ephemeral',
+			'text': 'Please provide an animal name.'
+		})
+
+	animal_name = parts[0]
+	flag = parts[1] if len(parts) > 1 and parts[1].startswith('--') else '--common_name'
+
+	# Fetch the animal data from the API
+	api_url = f'https://api.api-ninjas.com/v1/animals?name={animal_name}'
+	api_key = os.getenv('ANIMAL_API_KEY')
+
+	try:
+		response = requests.get(api_url, headers={'X-Api-Key': api_key})
+		response.raise_for_status()
+		animal_data = response.json()[0]
+	except requests.exceptions.RequestException as e:
+		return jsonify({
+			'response_type': 'ephemeral',
+			'text': f'Error fetching animal data: {e}'
+		})
+
+	# Extract the value based on the flag
+	if flag == '--common_name':
+		value = animal_data['characteristics']['common_name']
+	elif flag == '--taxonomy':
+		value = '\n'.join([f"{k.capitalize().replace('_', ' ')}: {v}" for k, v in animal_data['taxonomy'].items()])
+	elif flag == '--locations':
+		value = ', '.join(animal_data['locations'])
+	elif flag == '--characteristics':
+		value = '\n'.join([f'{re.sub(r"_+", " ", k).title()}: {re.sub(r", $", "", v) if v.endswith(",") else v}' if k != 'top_speed' else f'{re.sub(r"_+", " ", k).title()}: {v.upper()}' for k, v in animal_data['characteristics'].items()])
+	else:
+		return jsonify({
+			'response_type': 'ephemeral',
+			'text': 'Invalid flag. Available flags: --common_name, --taxonomy, --locations, --characteristics'
+		})
+
+	# Format the value for Color
+	if 'color' in animal_data['characteristics']:
+		colors = animal_data['characteristics']['color']
+		formatted_color = re.sub(r'(?<!^)(?=[A-Z])', '/', colors)
+		value = value.replace(f'Color: {colors}', f'Color: {formatted_color}')
+
+	# Format the response
+	if flag == '--common_name':
+		response_text = f'Common Name: {value}'
+	elif flag == '--taxonomy':
+		response_text = f'Taxonomy: \n\n{value}'
+	elif flag == '--characteristics':
+		response_text = f'Characteristics: \n\n{value}'
+	else:
+		response_text = f'{flag[2:]}: {value}'
+
+	return jsonify({
+		'response_type': 'in_channel',
+		'text': response_text
+	})
+
+
+
 if __name__ == '__main__':
 	app.run(port=5000)
